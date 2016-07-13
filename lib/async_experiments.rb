@@ -49,3 +49,24 @@ module AsyncExperiments
     [missing_entries, extra_entries]
   end
 end
+
+module GovukSidekiq
+  module RedisRecovery
+    class ClientMiddleware
+      def call(worker_class, job, queue, redis_pool)
+        Sidekiq.redis_info
+        yield
+      rescue Redis::BaseConnectionError => e
+        puts "Failed to connect to Redis, job:"
+        puts job
+      end
+    end
+  end
+end
+
+Sidekiq.configure_client do |config|
+  config.client_middleware do |chain|
+    puts "Adding GovukSidekiq::RedisRecovery::ClientMiddleware from async_experiments"
+    chain.add(GovukSidekiq::RedisRecovery::ClientMiddleware)
+  end
+end

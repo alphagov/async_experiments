@@ -33,4 +33,16 @@ RSpec.describe AsyncExperiments::ExperimentErrorWorker do
     expect(redis).to receive(:rpush).with("experiments:#{name}:exceptions", error)
     subject.perform(name, error)
   end
+
+  context "when redis is unavailable" do
+    before do
+      allow(Sidekiq).to receive(:redis).and_raise(Redis::CannotConnectError)
+    end
+
+    it "does not raise the connection error" do
+      expect {
+        subject.perform(name, error)
+      }.not_to raise_error(Redis::CannotConnectError)
+    end
+  end
 end
