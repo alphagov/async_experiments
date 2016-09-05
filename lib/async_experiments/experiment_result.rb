@@ -13,7 +13,7 @@ module AsyncExperiments
       @run_output = run_output
       @duration = duration
 
-      if Util.blank?(run_output) || Util.blank?(duration)
+      if Util.blank?(duration)
         redis_data = data_from_redis
 
         if redis_data
@@ -41,7 +41,7 @@ module AsyncExperiments
     end
 
     def available?
-      Util.present?(run_output) && Util.present?(duration)
+      Util.present?(duration)
     end
 
   protected

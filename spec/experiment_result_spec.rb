@@ -131,5 +131,12 @@ RSpec.describe AsyncExperiments::ExperimentResult do
       let(:duration) { 1.0 }
       it { is_expected.to be true }
     end
+
+    context "when run_output is nil and duration is provided" do
+      let(:output) { nil }
+      let(:duration) { 1.0 }
+
+      it { is_expected.to be true }
+    end
   end
 end
