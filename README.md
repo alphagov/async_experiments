@@ -36,6 +36,9 @@ branch of the [Publishing API](https://github.com/alphagov/publishing-api)
   code
 - `experiment_control` will return the results of the control code and the
   code can proceed as before
+- By default the results of the experiment will be stored in redis for 24 hours
+  this can be altered by including `results_expiry: {number of seconds}` in
+  the hash of `experiment_control` arguments.
 
 ```
 require "async_experiments/experiment_control"
