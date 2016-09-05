@@ -5,9 +5,10 @@ require "async_experiments/experiment_error_worker"
 RSpec.describe AsyncExperiments::ExperimentErrorWorker do
   let(:name) { "some_experiment" }
   let(:error) { "Something went wrong" }
+  let(:expiry) { 30 }
 
   let(:statsd) { double(:statsd, increment: nil) }
-  let(:redis) { double(:redis, rpush: nil) }
+  let(:redis) { double(:redis, rpush: nil, expire: nil) }
 
   subject { described_class.new }
 
@@ -20,17 +21,22 @@ RSpec.describe AsyncExperiments::ExperimentErrorWorker do
     Sidekiq::Testing.fake! do
       described_class.perform_async
 
-      expect(described_class.jobs.size).to eq(1)
+      expect(Sidekiq::Queues["experiments"].size).to eq(1)
     end
   end
 
   it "increments the statsd error count for the experiment" do
     expect(statsd).to receive(:increment).with("experiments.#{name}.exceptions")
-    subject.perform(name, error)
+    subject.perform(name, error, expiry)
   end
 
   it "stores the exception for later reporting" do
     expect(redis).to receive(:rpush).with("experiments:#{name}:exceptions", error)
-    subject.perform(name, error)
+    subject.perform(name, error, expiry)
+  end
+
+  it "sets an expiry time" do
+    expect(redis).to receive(:expire).with("experiments:#{name}:exceptions", expiry)
+    subject.perform(name, error, expiry)
   end
 end

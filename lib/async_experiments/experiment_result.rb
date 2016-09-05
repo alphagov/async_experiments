@@ -25,25 +25,19 @@ module AsyncExperiments
 
     attr_reader :key, :run_output, :duration
 
-    def store_run_output
-      redis.set("experiments:#{key}:#{type}", {
+    def store_run_output(expiry)
+      redis_key = "experiments:#{key}:#{type}"
+      redis.set(redis_key, {
         run_output: run_output,
         duration: duration,
       }.to_json)
+      redis.expire(redis_key, expiry)
     end
 
-    def process_run_output(candidate)
+    def process_run_output(candidate, expiry)
       variation = HashDiff.diff(sort(self.run_output), sort(candidate.run_output))
-      report_data(variation, candidate)
+      report_data(variation, candidate, expiry)
       redis.del("experiments:#{key}:candidate")
-    end
-
-    def control?
-      type == :control
-    end
-
-    def candidate?
-      type == :candidate
     end
 
     def available?
@@ -64,13 +58,14 @@ module AsyncExperiments
       end
     end
 
-    def report_data(variation, candidate)
+    def report_data(variation, candidate, expiry)
       statsd.timing("experiments.#{name}.control", self.duration)
       statsd.timing("experiments.#{name}.candidate", candidate.duration)
 
       if variation != []
         statsd.increment("experiments.#{name}.mismatches")
         redis.rpush("experiments:#{name}:mismatches", JSON.dump(variation))
+        redis.expire("experiments:#{name}:mismatches", expiry)
       end
     end
 

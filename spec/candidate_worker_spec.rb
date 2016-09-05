@@ -1,12 +1,22 @@
 require "spec_helper"
 require "async_experiments/candidate_worker"
-require "async_experiments/experiment_result_worker"
+require "async_experiments/experiment_result_candidate_worker"
 
 RSpec.describe AsyncExperiments::CandidateWorker do
   let(:name) { "some_experiment" }
   let(:id) { SecureRandom.uuid }
+  let(:candidate_expiry) { 5 }
+  let(:results_expiry) { 60 }
+  let(:arguments) do
+    {
+      name: name,
+      id: id,
+      candidate_expiry: candidate_expiry,
+      results_expiry: results_expiry,
+    }
+  end
 
-  let(:run_output) { [{some: "output"}] }
+  let(:run_output) { [{ some: "output" }] }
 
   class TestWorker < AsyncExperiments::CandidateWorker
     def perform(run_output, experiment_config)
@@ -29,23 +39,16 @@ RSpec.describe AsyncExperiments::CandidateWorker do
 
 
   it "returns the control run output" do
-    output = subject.perform(run_output,
-      name: name,
-      id: id,
-    )
-
+    output = subject.perform(run_output, arguments)
     expect(output).to eq(run_output)
   end
 
   describe "#experiment_candidate(experiment_config)" do
-    it "triggers an ExperimentResultWorker with the candidate output and duration" do
-      expect(AsyncExperiments::ExperimentResultWorker).to receive(:perform_async)
-        .with(name, id, run_output, instance_of(Float), :candidate)
+    it "triggers an ExperimentResultCandidateWorker with the candidate output and duration" do
+      expect(AsyncExperiments::ExperimentResultCandidateWorker).to receive(:perform_async)
+        .with(name, id, run_output, instance_of(Float), a_kind_of(Integer))
 
-      subject.perform(run_output,
-        name: name,
-        id: id,
-      )
+      subject.perform(run_output, arguments)
     end
 
     context "when experiment errors are being raised" do
@@ -62,10 +65,7 @@ RSpec.describe AsyncExperiments::CandidateWorker do
         allow(Time).to receive(:now).and_raise(StandardError.new("Test exception"))
 
         expect {
-          subject.perform(run_output,
-            "name" => name,
-            "id" => id,
-          )
+          subject.perform(run_output, arguments)
         }.to raise_error(Exception, "Test exception")
       end
     end
@@ -84,12 +84,9 @@ RSpec.describe AsyncExperiments::CandidateWorker do
         allow(Time).to receive(:now).and_raise(StandardError.new("Test exception"))
 
         expect(AsyncExperiments::ExperimentErrorWorker).to receive(:perform_async)
-          .with(name, instance_of(String))
+          .with(name, instance_of(String), a_kind_of(Integer))
 
-        subject.perform(run_output,
-          name: name,
-          id: id,
-        )
+        subject.perform(run_output, arguments)
       end
     end
   end

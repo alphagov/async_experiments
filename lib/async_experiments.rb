@@ -1,6 +1,8 @@
 require "json"
 require "securerandom"
-require "async_experiments/experiment_result_worker"
+require "async_experiments/experiment_result_candidate_worker"
+require "async_experiments/experiment_result_control_worker"
+
 
 module AsyncExperiments
   def self.statsd
