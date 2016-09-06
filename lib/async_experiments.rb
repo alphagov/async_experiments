@@ -14,13 +14,15 @@ module AsyncExperiments
   end
 
   def self.get_experiment_data(experiment_name)
-    mismatched_responses = Sidekiq.redis { |redis|
-      redis.lrange("experiments:#{experiment_name}:mismatches", 0, -1)
-    }
+    mismatched_responses = Sidekiq.redis do |redis|
+      mismatch_enumerator = redis.scan_each(
+        match: "experiments:#{experiment_name}:mismatches:*",
+      )
+      retrieve = -> (key) { redis.get(key) }
+      mismatch_enumerator.map(&retrieve).compact.map { |json| JSON.parse(json) }
+    end
 
-    mismatched_responses.map { |json|
-      parsed = JSON.parse(json)
-
+    mismatched_responses.map { |parsed|
       missing, other = parsed.partition {|(operator, _, _)|
         operator == "-"
       }

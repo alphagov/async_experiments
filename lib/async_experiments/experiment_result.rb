@@ -1,5 +1,6 @@
 require "json"
 require "hashdiff"
+require "digest/sha2"
 require "async_experiments/util"
 
 module AsyncExperiments
@@ -64,9 +65,16 @@ module AsyncExperiments
 
       if variation != []
         statsd.increment("experiments.#{name}.mismatches")
-        redis.rpush("experiments:#{name}:mismatches", JSON.dump(variation))
-        redis.expire("experiments:#{name}:mismatches", expiry)
+        store_mismatch(variation, expiry)
       end
+    end
+
+    def store_mismatch(mismatch, expiry)
+      json = JSON.dump(mismatch)
+      hash = Digest::SHA2.base64digest(json)
+      redis_key = "experiments:#{name}:mismatches:#{hash}"
+      redis.set(redis_key, json) unless redis.exists(redis_key)
+      redis.expire(redis_key, expiry)
     end
 
     def sort(object)

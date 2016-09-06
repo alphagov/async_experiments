@@ -19,9 +19,9 @@ RSpec.describe AsyncExperiments::ExperimentResult do
     double(
       :redis,
       set: true,
-      rpush: true,
       expire: true,
       del: true,
+      exists: false,
     )
   end
 
@@ -74,14 +74,26 @@ RSpec.describe AsyncExperiments::ExperimentResult do
         expect(statsd).to receive(:increment).with("experiments.#{name}.mismatches")
       end
 
-      it "adds the difference to redis" do
-        expect(redis).to receive(:rpush)
-          .with("experiments:#{name}:mismatches", a_kind_of(String))
+      context "and the the data is already in redis" do
+        before { allow(redis).to receive(:exists).and_return(true) }
+
+        it "doesn't add the difference to redis" do
+          expect(redis).not_to receive(:set)
+        end
+      end
+
+      context "but the data is already in redis" do
+        before { allow(redis).to receive(:exists).and_return(false) }
+
+        it "adds the difference to redis" do
+          expect(redis).to receive(:set)
+            .with(/^experiments:#{Regexp.quote(name)}:mismatches:/, a_kind_of(String))
+        end
       end
 
       it "sets the expiry in redis" do
         expect(redis).to receive(:expire)
-          .with("experiments:#{name}:mismatches", expiry)
+          .with(/^experiments:#{Regexp.quote(name)}:mismatches:/, expiry)
       end
     end
 
