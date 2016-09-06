@@ -40,6 +40,16 @@ module AsyncExperiments
     end
   end
 
+  def self.get_experiment_exceptions(experiment_name)
+    Sidekiq.redis do |redis|
+      enumerator = redis.scan_each(
+        match: "experiments:#{experiment_name}:exceptions:*"
+      )
+      retrieve = -> (key) { redis.get(key) }
+      enumerator.map(&retrieve).compact
+    end
+  end
+
   def self.fix_ordering_issues(missing_entries, extra_entries)
     duplicate_entries = missing_entries & extra_entries
 

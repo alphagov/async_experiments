@@ -3,6 +3,18 @@ require "json"
 require "async_experiments"
 
 RSpec.describe AsyncExperiments do
+  let(:redis) do
+    double(
+      :redis,
+      scan_each: nil,
+      get: nil,
+    )
+  end
+
+  before do
+    allow(Sidekiq).to receive(:redis).and_yield(redis)
+  end
+
   describe ".get_experiment_data(experiment_name)" do
     let(:name) { "some_experiment" }
 
@@ -18,16 +30,9 @@ RSpec.describe AsyncExperiments do
       ])
     end
 
-    let(:redis) do
-      double(
-        :redis,
-        scan_each: [1],
-        get: experiment_result,
-      )
-    end
-
     before do
-      allow(Sidekiq).to receive(:redis).and_yield(redis)
+      allow(redis).to receive(:scan_each).and_return([1])
+      allow(redis).to receive(:get).and_return(experiment_result)
     end
 
     it "partitions and resorts experiment results for useful output" do
@@ -46,6 +51,26 @@ RSpec.describe AsyncExperiments do
           "Changed element",
         ],
       ])
+    end
+  end
+
+  describe ".get_experiment_exceptions(experiment_name)" do
+    let(:name) { "some_experiment" }
+
+    let(:errors) do
+      ["error 1", "error 2"]
+    end
+
+    before do
+      allow(redis).to receive(:scan_each).and_return([1, 2])
+      allow(redis).to receive(:get).with(1).and_return(errors[0])
+      allow(redis).to receive(:get).with(2).and_return(errors[1])
+    end
+
+    it "returns a list of exceptions" do
+      results = described_class.get_experiment_exceptions(name)
+
+      expect(results).to eq(errors)
     end
   end
 end

@@ -8,7 +8,7 @@ RSpec.describe AsyncExperiments::ExperimentErrorWorker do
   let(:expiry) { 30 }
 
   let(:statsd) { double(:statsd, increment: nil) }
-  let(:redis) { double(:redis, rpush: nil, expire: nil) }
+  let(:redis) { double(:redis, set: nil, exists: false, expire: nil) }
 
   subject { described_class.new }
 
@@ -30,13 +30,28 @@ RSpec.describe AsyncExperiments::ExperimentErrorWorker do
     subject.perform(name, error, expiry)
   end
 
-  it "stores the exception for later reporting" do
-    expect(redis).to receive(:rpush).with("experiments:#{name}:exceptions", error)
-    subject.perform(name, error, expiry)
+  context "when redis already has the exception stored" do
+    before { allow(redis).to receive(:exists).and_return(true) }
+
+    it "does not store the exception" do
+      expect(redis).not_to receive(:set)
+      subject.perform(name, error, expiry)
+    end
+  end
+
+  context "when redis does not have the exception stored" do
+    before { allow(redis).to receive(:exists).and_return(false) }
+
+    it "stores the exception" do
+      expect(redis).to receive(:set)
+        .with(/^experiments:#{Regexp.quote(name)}:exceptions:/, error)
+      subject.perform(name, error, expiry)
+    end
   end
 
   it "sets an expiry time" do
-    expect(redis).to receive(:expire).with("experiments:#{name}:exceptions", expiry)
+    expect(redis).to receive(:expire)
+      .with(/^experiments:#{Regexp.quote(name)}:exceptions:/, expiry)
     subject.perform(name, error, expiry)
   end
 end
