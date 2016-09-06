@@ -22,14 +22,10 @@ module AsyncExperiments
       mismatch_enumerator.map(&retrieve).compact.map { |json| JSON.parse(json) }
     end
 
-    mismatched_responses.map { |parsed|
-      missing, other = parsed.partition {|(operator, _, _)|
-        operator == "-"
-      }
+    mismatched_responses.map do |parsed|
+      missing, other = parsed.partition { |(operator)| operator == "-" }
 
-      extra, changed = other.partition {|(operator, _, _)|
-        operator == "+"
-      }
+      extra, changed = other.partition { |(operator)| operator == "+" }
 
       missing_entries, extra_entries = self.fix_ordering_issues(
         missing.map(&:last),
@@ -41,7 +37,7 @@ module AsyncExperiments
         extra: extra_entries,
         changed: changed.map(&:last),
       }
-    }
+    end
   end
 
   def self.fix_ordering_issues(missing_entries, extra_entries)
