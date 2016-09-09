@@ -1,4 +1,4 @@
-require "async_experiments/experiment_result_worker"
+require "async_experiments/experiment_result_candidate_worker"
 require "async_experiments/experiment_error_worker"
 
 module AsyncExperiments
@@ -13,7 +13,7 @@ module AsyncExperiments
       start_time = Time.now
       run_output = yield
       duration = (Time.now - start_time).to_f
-      ExperimentResultWorker.perform_async(experiment[:name], experiment[:id], run_output, duration, :candidate)
+      ExperimentResultCandidateWorker.perform_async(experiment[:name], experiment[:id], run_output, duration, experiment[:candidate_expiry])
 
       run_output
     rescue StandardError => exception
@@ -22,7 +22,7 @@ module AsyncExperiments
       else
         backtrace = exception.backtrace
         backtrace.unshift(exception.inspect)
-        ExperimentErrorWorker.perform_async(experiment[:name], backtrace.join("\n"))
+        ExperimentErrorWorker.perform_async(experiment[:name], backtrace.join("\n"), experiment[:results_expiry])
       end
     end
   end

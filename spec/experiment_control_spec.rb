@@ -1,6 +1,6 @@
 require "spec_helper"
 require "async_experiments/experiment_control"
-require "async_experiments/experiment_result_worker"
+require "async_experiments/experiment_result_control_worker"
 
 RSpec.describe AsyncExperiments::ExperimentControl do
   let(:name) { :some_experiment }
@@ -15,7 +15,7 @@ RSpec.describe AsyncExperiments::ExperimentControl do
     }
   }
 
-  let(:run_output) { [{some: "output"}] }
+  let(:run_output) { [{ some: "output" }] }
 
   class TestClass
     include AsyncExperiments::ExperimentControl
@@ -34,10 +34,10 @@ RSpec.describe AsyncExperiments::ExperimentControl do
     allow(SecureRandom).to receive(:uuid).and_return(id)
   end
 
-  describe "#experiment_control(name, candidate: candidate_config)" do
-    it "triggers an ExperimentResultWorker with the control output and duration" do
-      expect(AsyncExperiments::ExperimentResultWorker).to receive(:perform_async)
-        .with(name, id, run_output, instance_of(Float), :control)
+  describe "#experiment_control" do
+    it "triggers an ExperimentResultControlWorker with the control output and duration" do
+      expect(AsyncExperiments::ExperimentResultControlWorker).to receive(:perform_in)
+        .with(1, name, id, run_output, instance_of(Float), a_kind_of(Integer))
 
       subject.call(name, run_output, candidate_config)
     end
@@ -47,6 +47,8 @@ RSpec.describe AsyncExperiments::ExperimentControl do
         .with(*candidate_args,
           name: name,
           id: id,
+          candidate_expiry: a_kind_of(Integer),
+          results_expiry: a_kind_of(Integer),
         )
 
       subject.call(name, run_output, candidate_config)

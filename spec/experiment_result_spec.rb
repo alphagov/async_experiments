@@ -2,135 +2,153 @@ require "spec_helper"
 require "async_experiments/experiment_result"
 
 RSpec.describe AsyncExperiments::ExperimentResult do
+  let(:name) { :test_name }
   let(:id) { SecureRandom.uuid }
-  let(:name) { :test_experiment }
-
-  let(:control_run_output) { "control output" }
-  let(:control_duration) { 10.0 }
-
-  let(:candidate_run_output) { "candidate output" }
-  let(:candidate_duration) { 5.0 }
-
-  let(:redis) { double(:redis, del: nil) }
-  let(:statsd) { double(:statsd, timing: nil, increment: nil) }
-
-  let(:control) { described_class.new(name, id, :control, redis, statsd, control_run_output, control_duration) }
-  let(:candidate) { described_class.new(name, id, :candidate, redis, statsd, candidate_run_output, candidate_duration) }
-
-  describe "#key" do
-    it "builds a key from the name and ID" do
-      expect(control.key).to eq("test_experiment:#{id}")
-    end
+  let(:type) { :control }
+  let(:output) { "output" }
+  let(:duration) { 1.0 }
+  let(:redis_key) { "experiments:#{name}:#{id}:#{type}" }
+  let(:statsd) do
+    double(
+      :statsd,
+      timing: nil,
+      increment: nil,
+    )
   end
+  let(:redis) do
+    double(
+      :redis,
+      set: true,
+      expire: true,
+      del: true,
+      exists: false,
+    )
+  end
+
+  subject { described_class.new(name, id, type, redis, statsd, output, duration) }
 
   describe "#store_run_output" do
-    it "stores the branch's run output and duration" do
-      expect(redis).to receive(:set)
-        .with("experiments:#{name}:#{id}:candidate", {
-          run_output: candidate_run_output,
-          duration: candidate_duration,
-        }.to_json)
+    let(:expiry) { 10 }
+    after { subject.store_run_output(expiry) }
 
-      candidate.store_run_output
+    it "sets item in redis" do
+      expect(redis).to receive(:set)
+        .with(redis_key, { run_output: output, duration: duration }.to_json)
+    end
+
+    it "sets an expiry on the redis entry" do
+      expect(redis).to receive(:expire)
+        .with(redis_key, expiry)
     end
   end
 
-  describe "control#process_run_output(candidate)" do
-    before do
-      allow(redis).to receive(:rpush)
+  describe "#process_run_output" do
+    let(:candidate_key) { "experiments:#{name}:#{id}:candidate" }
+    let(:candidate_duration) { 5.0 }
+    let(:candidate_output) { "different" }
+    let(:candidate) do
+      double(
+        :candidate,
+        run_output: candidate_output,
+        duration: candidate_duration,
+      )
     end
+    let(:expiry) { 30 }
+    after { subject.process_run_output(candidate, expiry) }
 
-    it "reports the control and candidate durations to statsd" do
+    it "stores the durations with statsd" do
       expect(statsd).to receive(:timing)
-        .with("experiments.#{name}.control", control_duration)
-
+        .with("experiments.#{name}.control", duration)
       expect(statsd).to receive(:timing)
         .with("experiments.#{name}.candidate", candidate_duration)
-
-      control.process_run_output(candidate)
     end
 
-    it "deletes the candidate data from redis" do
-      expect(redis).to receive(:del).with("experiments:#{name}:#{id}:candidate")
-
-      control.process_run_output(candidate)
+    it "deletes candidate data" do
+      expect(redis).to receive(:del).with(candidate_key)
     end
 
-    context "if there's variation between the outputs" do
-      it "increments the mismatch count in statsd" do
-        expect(statsd).to receive(:increment)
-          .with("experiments.#{name}.mismatches")
+    context "when candidate data is different to control data" do
+      let(:candidate_output) { "different" }
 
-        control.process_run_output(candidate)
+      it "increments mismatch count with statsd" do
+        expect(statsd).to receive(:increment).with("experiments.#{name}.mismatches")
       end
 
-      it "logs the mismatch to redis" do
-        expect(redis).to receive(:rpush).with(
-          "experiments:#{name}:mismatches",
-          [["~", "", "control output", "candidate output"]].to_json,
-        )
+      context "and the the data is already in redis" do
+        before { allow(redis).to receive(:exists).and_return(true) }
 
-        control.process_run_output(candidate)
+        it "doesn't add the difference to redis" do
+          expect(redis).not_to receive(:set)
+        end
+      end
+
+      context "but the data is already in redis" do
+        before { allow(redis).to receive(:exists).and_return(false) }
+
+        it "adds the difference to redis" do
+          expect(redis).to receive(:set)
+            .with(/^experiments:#{Regexp.quote(name)}:mismatches:/, a_kind_of(String))
+        end
+      end
+
+      it "sets the expiry in redis" do
+        expect(redis).to receive(:expire)
+          .with(/^experiments:#{Regexp.quote(name)}:mismatches:/, expiry)
       end
     end
 
-    context "if there's no variation" do
-      let(:candidate_run_output) { control_run_output }
+    context "when candidate data is the same as control data" do
+      let(:candidate_output) { output }
 
-      it "does not increment the mismatch count" do
+      it "doesn't increment a mismatch with statsd" do
         expect(statsd).not_to receive(:increment)
-        control.process_run_output(candidate)
       end
 
-      it "does not log the mismatch to redis" do
+      it "doesn't add a difference to redis" do
         expect(redis).not_to receive(:rpush)
-        control.process_run_output(candidate)
+      end
+
+      it "doesn't update mismatch result expiry" do
+        expect(redis).not_to receive(:expire)
       end
     end
   end
 
-  describe ".new" do
-    let(:type) { :candidate }
+  describe "#available?" do
+    subject { described_class.new(name, id, type, redis, statsd, output, duration).available? }
 
-    context "if duration and output are provided" do
-      it "uses those" do
-        candidate = described_class.new(name, id, type, redis, statsd, "arbitrary output", 1.23)
-        expect(candidate.run_output).to eq("arbitrary output")
-        expect(candidate.duration).to eq(1.23)
+    context "when instance is initialised with output and duration as nil" do
+      let(:output) { nil }
+      let(:duration) { nil }
+      before do
+        allow(redis).to receive(:get)
+          .and_return(redis_data.nil? ? nil : JSON.dump(redis_data))
+      end
+
+      context "and redis has the data" do
+        let(:redis_data) { { run_output: "output", duration: 1.0 } }
+
+        it { is_expected.to be true }
+      end
+
+      context "but redis doesn't have the data" do
+        let(:redis_data) { nil }
+
+        it { is_expected.to be false }
       end
     end
 
-    context "if duration and output are not provided" do
-      context "and redis has the data" do
-        before do
-          allow(redis).to receive(:get).with("experiments:#{name}:#{id}:#{type}").and_return({
-            run_output: candidate_run_output,
-            duration: candidate_duration,
-          }.to_json)
-        end
+    context "when instance is initialised with output and duration as values" do
+      let(:output) { "output" }
+      let(:duration) { 1.0 }
+      it { is_expected.to be true }
+    end
 
-        it "uses the redis data" do
-          candidate = described_class.new(name, id, type, redis, statsd)
-          expect(candidate.run_output).to eq(candidate_run_output)
-          expect(candidate.duration).to eq(candidate_duration)
-        end
+    context "when run_output is nil and duration is provided" do
+      let(:output) { nil }
+      let(:duration) { 1.0 }
 
-        it "is considered available" do
-          candidate = described_class.new(name, id, type, redis, statsd)
-          expect(candidate.available?).to eq(true)
-        end
-      end
-
-      context "but redis does not have the data" do
-        before do
-          allow(redis).to receive(:get).and_return("")
-        end
-
-        it "is considered unavailable" do
-          missing_candidate = described_class.new(name, id, type, redis, statsd)
-          expect(missing_candidate.available?).to eq(false)
-        end
-      end
+      it { is_expected.to be true }
     end
   end
 end

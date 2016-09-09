@@ -1,5 +1,6 @@
 require "json"
 require "hashdiff"
+require "digest/sha2"
 require "async_experiments/util"
 
 module AsyncExperiments
@@ -13,7 +14,7 @@ module AsyncExperiments
       @run_output = run_output
       @duration = duration
 
-      if Util.blank?(run_output) || Util.blank?(duration)
+      if Util.blank?(duration)
         redis_data = data_from_redis
 
         if redis_data
@@ -25,29 +26,23 @@ module AsyncExperiments
 
     attr_reader :key, :run_output, :duration
 
-    def store_run_output
-      redis.set("experiments:#{key}:#{type}", {
+    def store_run_output(expiry)
+      redis_key = "experiments:#{key}:#{type}"
+      redis.set(redis_key, {
         run_output: run_output,
         duration: duration,
       }.to_json)
+      redis.expire(redis_key, expiry)
     end
 
-    def process_run_output(candidate)
+    def process_run_output(candidate, expiry)
       variation = HashDiff.diff(sort(self.run_output), sort(candidate.run_output))
-      report_data(variation, candidate)
+      report_data(variation, candidate, expiry)
       redis.del("experiments:#{key}:candidate")
     end
 
-    def control?
-      type == :control
-    end
-
-    def candidate?
-      type == :candidate
-    end
-
     def available?
-      Util.present?(run_output) && Util.present?(duration)
+      Util.present?(duration)
     end
 
   protected
@@ -64,14 +59,22 @@ module AsyncExperiments
       end
     end
 
-    def report_data(variation, candidate)
+    def report_data(variation, candidate, expiry)
       statsd.timing("experiments.#{name}.control", self.duration)
       statsd.timing("experiments.#{name}.candidate", candidate.duration)
 
       if variation != []
         statsd.increment("experiments.#{name}.mismatches")
-        redis.rpush("experiments:#{name}:mismatches", JSON.dump(variation))
+        store_mismatch(variation, expiry)
       end
+    end
+
+    def store_mismatch(mismatch, expiry)
+      json = JSON.dump(mismatch)
+      hash = Digest::SHA2.base64digest(json)
+      redis_key = "experiments:#{name}:mismatches:#{hash}"
+      redis.set(redis_key, json) unless redis.exists(redis_key)
+      redis.expire(redis_key, expiry)
     end
 
     def sort(object)
