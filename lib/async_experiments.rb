@@ -14,12 +14,9 @@ module AsyncExperiments
   end
 
   def self.get_experiment_data(experiment_name)
-    mismatched_responses = Sidekiq.redis do |redis|
-      mismatch_enumerator = redis.scan_each(
-        match: "experiments:#{experiment_name}:mismatches:*",
-      )
-      retrieve = -> (key) { redis.get(key) }
-      mismatch_enumerator.map(&retrieve).compact.map { |json| JSON.parse(json) }
+    key_pattern = "experiments:#{experiment_name}:mismatches:*"
+    mismatched_responses = redis_scan_and_retrieve(key_pattern).map do |json|
+      JSON.parse(json)
     end
 
     mismatched_responses.map do |parsed|
@@ -41,9 +38,13 @@ module AsyncExperiments
   end
 
   def self.get_experiment_exceptions(experiment_name)
+    redis_scan_and_retrieve("experiments:#{experiment_name}:exceptions:*")
+  end
+
+  def self.redis_scan_and_retrieve(key_pattern)
     Sidekiq.redis do |redis|
       enumerator = redis.scan_each(
-        match: "experiments:#{experiment_name}:exceptions:*"
+        match: key_pattern
       )
       retrieve = -> (key) { redis.get(key) }
       enumerator.map(&retrieve).compact

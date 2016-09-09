@@ -73,4 +73,38 @@ RSpec.describe AsyncExperiments do
       expect(results).to eq(errors)
     end
   end
+
+  describe ".redis_scan_and_retrieve" do
+    subject { described_class.redis_scan_and_retrieve(key_pattern) }
+    let(:key_pattern) { "pattern" }
+
+    context "no items" do
+      before { allow(redis).to receive(:scan_each).and_return([]) }
+      it { is_expected.to eq([]) }
+    end
+
+    context "all items exist" do
+      let(:items) { ["item 1", "item 2"] }
+
+      before do
+        allow(redis).to receive(:scan_each).and_return([1, 2])
+        allow(redis).to receive(:get).with(1).and_return(items[0])
+        allow(redis).to receive(:get).with(2).and_return(items[1])
+      end
+
+      it { is_expected.to eq(items) }
+    end
+
+    context "some items are not available" do
+      let(:item) { "item" }
+
+      before do
+        allow(redis).to receive(:scan_each).and_return([1, 2])
+        allow(redis).to receive(:get).with(1).and_return(item)
+        allow(redis).to receive(:get).with(2).and_return(nil)
+      end
+
+      it { is_expected.to eq([item]) }
+    end
+  end
 end
